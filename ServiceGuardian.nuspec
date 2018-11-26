@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package>
+  <metadata>
+    <id>ServiceGuardian</id>
+    <version>1.0.1.0</version>
+    <title>ServiceGuardian</title>
+    <authors>Giles Wakefield</authors>
+    <owners>Giles Wakefield</owners>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>Windows service to monitor, install and re-launch other services.</description>
+    <releaseNotes></releaseNotes>
+    <copyright>Copyright 2018</copyright>
+    <tags>Service</tags>
+  </metadata> 
+</package>
