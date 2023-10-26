@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.ServiceProcess;
 using System.Threading;
+using Topshelf;
 
 namespace ServiceGuardian
 {
@@ -14,16 +15,20 @@ namespace ServiceGuardian
         private static readonly Logger _log =
         LogManager.GetCurrentClassLogger();
         private readonly MonitoredServices _serviceCollection;
+        private readonly int _killTimeInMins;
+        private HostControl _hostControl;
 
-        public MainService(MonitoredServices serviceCollection)
+        public MainService(MonitoredServices serviceCollection, int killTimeInMins)
         {
             _serviceCollection = serviceCollection;
+            _killTimeInMins = killTimeInMins;
         }
 
         ServiceMonitor _monitor;
 
-        public void Start()
+        public bool Start(HostControl hostControl)
         {
+            _hostControl = hostControl;
             if (!StopMonitor())
             {
                 _log.Error("Attempt to re-start, but Could not stop existing service cleanly!");
@@ -43,6 +48,7 @@ namespace ServiceGuardian
                 _log.Error("Could not start monitor.");
                 throw new Exception("Failed to Start service");
             }
+            return true;
         }
 
         public void Stop()
@@ -61,8 +67,19 @@ namespace ServiceGuardian
 
 
         bool StartMonitor()
-        {
-            _monitor = new ServiceMonitor(_log);
+        {            
+            if (_killTimeInMins > 0)
+            {
+                var killTime = DateTime.Now.AddMinutes(_killTimeInMins);
+                _log.Warn($"Service monitoring app will stop at {killTime:O}");
+                _monitor = new ServiceMonitor(_log, killTime, _hostControl);
+            }
+            else 
+            {
+                _log.Info($"Service monitoring will continue indefinitely");
+                _monitor = new ServiceMonitor(_log, _hostControl);
+            }
+
             _monitor.Start(_serviceCollection);
 
             var timeoutTime = DateTime.Now.AddSeconds(5);
@@ -124,12 +141,21 @@ namespace ServiceGuardian
     {
         private readonly Logger _log;
 
-        public ServiceMonitor(Logger log)
+        public ServiceMonitor(Logger log, HostControl hostControl)
         {
             _log = log;
-
+            _hostControl = hostControl;
         }
 
+        public ServiceMonitor(Logger log, DateTime killTime, HostControl hostControl)
+        {
+            _log = log;
+            _killtime = killTime;
+            _hostControl = hostControl;
+        }
+
+        private DateTime? _killtime = null;
+        private readonly HostControl _hostControl;
         private ServiceMonitorState _state;
         public ServiceMonitorState State
         {
@@ -213,7 +239,10 @@ namespace ServiceGuardian
 
         public void Stop()
         {
-            State = ServiceMonitorState.Stopping;
+            if (State != ServiceMonitorState.Stopped)
+            {
+                State = ServiceMonitorState.Stopping;
+            }
         }
 
         //Main thread method
@@ -225,6 +254,12 @@ namespace ServiceGuardian
             {
                 while (State == ServiceMonitorState.Monitoring)
                 {
+                    if (_killtime.HasValue && DateTime.Now > _killtime.Value)
+                    {
+                        _log.Warn($"Self-terminate time has been reached.  app will now stop");
+                        Stop();
+                    }
+
                     var servicesToCheck = _services.Where(s => s.NextCheck <= DateTime.Now);
 
                     if (servicesToCheck.Any())
@@ -255,6 +290,8 @@ namespace ServiceGuardian
                 State = ServiceMonitorState.Doomed;
                 _log.Error($"exception raised While Monitoring! - {ex.Message}");
             }
+            //Attempt to stop the service completely.
+            _hostControl.Stop();
         }
 
         private void CheckService(ServiceInfo svc)
